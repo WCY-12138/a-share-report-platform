@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>A股持仓日报平台</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">
+          <i></i><i></i><i></i>
+        </span>
+        <div class="brand-text">
+          <strong>A股复盘台</strong>
+          <span>个人持仓日报</span>
+        </div>
+      </div>
+      <nav class="nav" aria-label="主导航">
+        <button type="button" class="nav-item is-active" data-view="overview">总览</button>
+        <button type="button" class="nav-item" data-view="history">历史</button>
+        <button type="button" class="nav-item" data-view="import">导入</button>
+        <button type="button" class="nav-item" data-view="review">复盘</button>
+      </nav>
+      <div class="source-box">
+        <span class="source-dot" id="sourceDot"></span>
+        <div>
+          <strong>数据源</strong>
+          <span id="sourceLabel">连接中</span>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="topbar-title">
+          <h1 id="viewTitle">日报总览</h1>
+          <p id="viewSubtitle">加载中</p>
+        </div>
+        <div class="topbar-actions">
+          <button type="button" id="refreshBtn" class="btn">刷新</button>
+          <button type="button" id="exportBtn" class="btn">导出</button>
+          <button type="button" id="addBtn" class="btn btn-primary">添加日报</button>
+        </div>
+      </header>
+
+      <section id="view-overview" class="view is-active" aria-labelledby="viewTitle">
+        <div class="overview-toolbar">
+          <div class="date-picker">
+            <button type="button" id="prevDay" class="icon-btn" aria-label="前一天">‹</button>
+            <select id="dateSelect" class="form-select" aria-label="选择日报日期"></select>
+            <button type="button" id="nextDay" class="icon-btn" aria-label="后一天">›</button>
+            <button type="button" id="todayBtn" class="btn">今天</button>
+          </div>
+          <span id="overviewDateLabel" class="date-label"></span>
+        </div>
+
+        <div id="emptyOverview" class="empty-state hidden">
+          <strong>暂无日报</strong>
+          <span>在“导入”页面粘贴或上传 Markdown 日报，或将文件放入 reports/ 文件夹后刷新。</span>
+        </div>
+
+        <div id="overviewContent">
+          <div id="kpiGrid" class="kpi-grid"></div>
+
+          <section class="panel">
+            <div class="panel-head">
+              <h2>大盘环境</h2>
+              <span>收盘后 16:00</span>
+            </div>
+            <div id="marketGrid" class="market-grid"></div>
+            <div class="market-note">
+              <span class="note-label">市场主线</span>
+              <p id="marketTone"></p>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <h2>个股跟踪</h2>
+              <span>长期与短线持仓</span>
+            </div>
+            <div id="holdingGrid" class="holding-grid"></div>
+          </section>
+
+          <div class="two-col">
+            <section class="panel">
+              <div class="panel-head">
+                <h2>板块联动</h2>
+                <span>当日排名</span>
+              </div>
+              <div id="sectorChart" class="sector-chart"></div>
+              <div class="signal-line">
+                <span class="note-label">轮动信号</span>
+                <p id="rotationSignal"></p>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <h2>明日关注</h2>
+                <span>事件与关键价位</span>
+              </div>
+              <ol id="tomorrowList" class="watch-list"></ol>
+            </section>
+          </div>
+
+          <section class="panel">
+            <div class="panel-head">
+              <h2>复盘速记</h2>
+              <span id="reviewDateLabel"></span>
+            </div>
+            <div class="review-editor">
+              <textarea id="quickNote" rows="4" placeholder="当日复盘笔记"></textarea>
+              <div class="review-actions">
+                <button type="button" id="saveNoteBtn" class="btn btn-primary">保存笔记</button>
+                <span id="noteSavedAt" class="muted"></span>
+              </div>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section id="view-history" class="view" aria-labelledby="viewTitle">
+        <div class="history-toolbar">
+          <input type="search" id="historySearch" class="form-control" placeholder="搜索日期或关键词" aria-label="搜索历史日报">
+          <span id="reportCount" class="muted"></span>
+        </div>
+        <div id="historyList" class="history-list"></div>
+      </section>
+
+      <section id="view-import" class="view" aria-labelledby="viewTitle">
+        <div class="import-layout">
+          <section class="panel import-panel">
+            <div class="panel-head">
+              <h2>Markdown 日报</h2>
+              <span>.md / .txt</span>
+            </div>
+            <div class="file-field">
+              <input type="file" id="fileInput" class="form-control" accept=".md,.txt,text/markdown,text/plain">
+            </div>
+            <div class="import-meta">
+              <label class="field">
+                <span>日期</span>
+                <input type="date" id="importDate" class="form-control">
+              </label>
+              <label class="field">
+                <span>文件名</span>
+                <input type="text" id="importFilename" class="form-control" readonly>
+              </label>
+            </div>
+            <label class="field">
+              <span>日报正文</span>
+              <textarea id="importText" rows="16" placeholder="粘贴日报正文"></textarea>
+            </label>
+            <div class="import-actions">
+              <button type="button" id="previewBtn" class="btn">解析预览</button>
+              <button type="button" id="saveReportBtn" class="btn btn-primary">保存日报</button>
+            </div>
+          </section>
+
+          <section class="panel preview-panel">
+            <div class="panel-head">
+              <h2>解析预览</h2>
+              <span id="parseStatus" class="muted">等待内容</span>
+            </div>
+            <div id="parsePreview" class="parse-preview">
+              <div class="empty-inline">尚未解析</div>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section id="view-review" class="view" aria-labelledby="viewTitle">
+        <div id="reviewSummaryGrid" class="review-summary-grid"></div>
+        <div class="review-layout">
+          <section class="panel">
+            <div class="panel-head">
+              <h2>持仓趋势</h2>
+              <span>基于日报收盘价</span>
+            </div>
+            <div id="trendChart" class="trend-chart"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <h2>复盘记录</h2>
+              <span>评分与备注</span>
+            </div>
+            <div class="review-form">
+              <div class="form-row">
+                <label class="field">
+                  <span>日期</span>
+                  <select id="reviewDate" class="form-select"></select>
+                </label>
+                <label class="field">
+                  <span>标的</span>
+                  <select id="reviewStock" class="form-select"></select>
+                </label>
+              </div>
+              <div class="score-field">
+                <span>评分</span>
+                <div id="scoreButtons" class="score-buttons" role="group" aria-label="复盘评分"></div>
+              </div>
+              <label class="field">
+                <span>备注</span>
+                <textarea id="reviewNote" rows="4" placeholder="复盘备注"></textarea>
+              </label>
+              <button type="button" id="addReviewBtn" class="btn btn-primary">记录复盘</button>
+            </div>
+          </section>
+        </div>
+        <section class="panel review-list-panel">
+          <div class="panel-head">
+            <h2>历史复盘</h2>
+            <span id="reviewCount"></span>
+          </div>
+          <div id="reviewList" class="review-list"></div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="app.js"></script>
+</body>
+</html>
