@@ -715,6 +715,76 @@ textarea {
   gap: 12px;
 }
 
+.verify-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.verify-good {
+  color: var(--down);
+  font-weight: 600;
+}
+
+.verify-bad {
+  color: var(--up);
+  font-weight: 600;
+}
+
+.verify-result {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.verify-item {
+  display: grid;
+  grid-template-columns: 110px 80px minmax(0, 1fr) 72px;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-size: 12px;
+}
+
+.verify-item.mismatch {
+  border-color: rgba(194, 52, 46, 0.5);
+  background: var(--up-bg);
+}
+
+.verify-name {
+  font-weight: 600;
+}
+
+.verify-field {
+  color: var(--muted);
+}
+
+.verify-values {
+  color: #3d4b5c;
+  overflow-wrap: anywhere;
+}
+
+.verify-status {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.verify-item.match .verify-status {
+  color: var(--down);
+}
+
+.verify-item.mismatch .verify-status {
+  color: var(--up);
+}
+
+.verify-item.missing .verify-status {
+  color: var(--muted);
+}
+
 .history-toolbar .form-control {
   width: min(380px, 100%);
 }
@@ -1127,6 +1197,20 @@ textarea {
 
   .sector-row {
     grid-template-columns: 92px minmax(0, 1fr) 56px;
+  }
+
+  .verify-item {
+    grid-template-columns: 1fr;
+  }
+
+  .verify-field,
+  .verify-values {
+    grid-column: 1;
+  }
+
+  .verify-status {
+    grid-column: 1;
+    text-align: left;
   }
 }
 
