@@ -3,19 +3,30 @@
 const STOCK_META = [
   { name: '恒邦股份', code: '002237', position: '3000 股', term: '长期', sector: '贵金属', tag: '重仓', color: '#b7791f' },
   { name: '沃格光电', code: '603773', position: '200 股', term: '长期', sector: '光电显示', tag: '持仓', color: '#2467a8' },
-  { name: '福瑞医科', code: '301272', position: '100 股', term: '长期', sector: '医疗健康', tag: '持仓', color: '#17855c' },
+  { name: '福瑞医科', code: '300049', position: '100 股', term: '长期', sector: '医疗健康', tag: '持仓', color: '#17855c' },
   { name: '京东方', code: '000725', position: '100 股', term: '短期', sector: '面板', tag: '短线', color: '#c2342e' },
 ];
 
 const SERIES_COLORS = ['#c2342e', '#b7791f', '#2467a8', '#17855c'];
+const VERIFY_SECIDS = [
+  { name: '上证指数', secid: '1.000001', tencent: 'sh000001', kind: 'index' },
+  { name: '深证成指', secid: '0.399001', tencent: 'sz399001', kind: 'index' },
+  { name: '创业板指', secid: '0.399006', tencent: 'sz399006', kind: 'index' },
+  { name: '恒邦股份', secid: '0.002237', tencent: 'sz002237', kind: 'stock' },
+  { name: '沃格光电', secid: '1.603773', tencent: 'sh603773', kind: 'stock' },
+  { name: '福瑞医科', secid: '0.300049', tencent: 'sz300049', kind: 'stock' },
+  { name: '京东方', secid: '0.000725', tencent: 'sz000725', kind: 'stock' },
+];
 const LS_REPORTS = 'a-share-daily-platform-reports-v1';
 const LS_REVIEWS = 'a-share-daily-platform-reviews-v1';
 const LS_NOTES = 'a-share-daily-platform-notes-v1';
+const LS_VERIFY = 'a-share-daily-platform-verification-v1';
 
 const state = {
   reports: [],
   reviews: [],
   notes: {},
+  verification: {},
   source: 'local',
   currentDate: null,
   currentView: 'overview',
@@ -27,10 +38,15 @@ document.addEventListener('DOMContentLoaded', init);
 function init() {
   state.reviews = loadReviews();
   state.notes = loadNotes();
+  state.verification = loadVerification();
   document.getElementById('importDate').value = todayStr();
   updateImportFilename();
   bindEvents();
   refreshData(true);
+  const autoVerifyDate = new URLSearchParams(window.location.search).get('verify');
+  if (autoVerifyDate) {
+    setTimeout(() => runVerification(autoVerifyDate), 800);
+  }
 }
 
 function bindEvents() {
@@ -51,6 +67,7 @@ function bindEvents() {
   document.getElementById('todayBtn').addEventListener('click', goToLatest);
 
   document.getElementById('saveNoteBtn').addEventListener('click', saveQuickNote);
+  document.getElementById('verifyBtn').addEventListener('click', () => runVerification(state.currentDate));
 
   document.getElementById('historySearch').addEventListener('input', renderHistory);
   document.getElementById('historyList').addEventListener('click', handleHistoryClick);
@@ -278,6 +295,7 @@ function renderOverview() {
   document.getElementById('rotationSignal').textContent = parsed.signal || '暂无明确轮动信号';
   document.getElementById('quickNote').value = state.notes[report.date] || '';
   document.getElementById('reviewDateLabel').textContent = report.date;
+  renderVerification(report.date);
 }
 
 function marketCell(name, value, sub) {
@@ -395,6 +413,227 @@ function renderSectors(sectors) {
     .join('');
 }
 
+function renderVerification(date) {
+  const status = document.getElementById('verifyStatus');
+  const lastRun = document.getElementById('verifyLastRun');
+  const result = document.getElementById('verifyResult');
+  const data = state.verification[date];
+  if (!data) {
+    status.textContent = '尚未校验';
+    status.className = '';
+    lastRun.textContent = '';
+    result.innerHTML = '<div class="empty-inline">点击后将通过东方财富历史行情接口逐项核对</div>';
+    return;
+  }
+  status.textContent = data.summary.text;
+  status.className = data.summary.mismatch > 0 ? 'verify-bad' : 'verify-good';
+  lastRun.textContent = `上次校验 ${formatTime(data.timestamp)} · ${data.source}`;
+  const labels = { match: '一致', mismatch: '有出入', missing: '未核验' };
+  result.innerHTML = data.items
+    .map(
+      (item) => `
+        <div class="verify-item ${item.status}">
+          <span class="verify-name">${esc(item.name)}</span>
+          <span class="verify-field">${esc(item.field)}</span>
+          <span class="verify-values">报告 ${esc(item.reportValue || '—')} / 线上 ${esc(item.onlineValue || '—')}</span>
+          <span class="verify-status">${labels[item.status] || item.status}</span>
+        </div>`
+    )
+    .join('');
+}
+
+async function runVerification(date) {
+  const report = state.reports.find((item) => item.date === date);
+  if (!report) {
+    toast('未找到日报');
+    return;
+  }
+  const button = document.getElementById('verifyBtn');
+  const originalText = button.textContent;
+  button.disabled = true;
+  button.textContent = '校验中...';
+  document.getElementById('verifyStatus').textContent = '正在联网核对...';
+  document.getElementById('verifyLastRun').textContent = '';
+  document.getElementById('verifyResult').innerHTML =
+    '<div class="empty-inline">正在向东方财富历史行情接口核对...</div>';
+
+  const results = [];
+  await Promise.all(
+    VERIFY_SECIDS.map(async (target) => {
+      try {
+        const online = await fetchOnlineKline(target, date);
+        results.push(...compareReportToOnline(report, target, online));
+      } catch (error) {
+        results.push({
+          name: target.name,
+          field: '行情接口',
+          reportValue: '—',
+          onlineValue: error.message || '获取失败',
+          status: 'missing',
+        });
+      }
+    })
+  );
+
+  const summary = summarizeVerification(results);
+  state.verification[date] = {
+    timestamp: new Date().toISOString(),
+    source: '东方财富历史行情',
+    summary,
+    items: results,
+  };
+  saveVerification();
+  renderVerification(date);
+  toast(summary.text);
+  button.disabled = false;
+  button.textContent = originalText;
+}
+
+async function fetchOnlineKline(target, date) {
+  const start = dateOffset(date, -130);
+  const url = tencentKlineUrl(target.tencent, start, date);
+  const payload = await fetchTencentKlines(url);
+  const klines = parseTencentKlines(payload, target.tencent);
+  const index = klines.findIndex((item) => item.date === date);
+  if (index === -1) {
+    const firstDate = klines.length ? klines[0].date : '空';
+    const lastDate = klines.length ? klines[klines.length - 1].date : '空';
+    throw new Error(`该日期无K线（${firstDate}~${lastDate}）`);
+  }
+  const closes = klines.slice(0, index + 1).map((item) => item.close);
+  const row = klines[index];
+  const prevClose = index > 0 ? klines[index - 1].close : null;
+  const pct = prevClose ? Math.round(((row.close - prevClose) / prevClose) * 10000) / 100 : null;
+  return {
+    close: row.close,
+    pct,
+    amountYi: Math.round((row.amountWan / 10000) * 100) / 100,
+    turnover: row.turnover,
+    ma5: averageLast(closes, 5),
+    ma10: averageLast(closes, 10),
+    ma20: averageLast(closes, 20),
+    ma60: averageLast(closes, 60),
+  };
+}
+
+function tencentKlineUrl(tencent, start, end) {
+  return `https://web.ifzq.gtimg.cn/appstock/app/newfqkline/get?param=${tencent},day,${start},${end},800,qfq`;
+}
+
+async function fetchTencentKlines(url) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 12000);
+  try {
+    const res = await fetch(url, {
+      signal: controller.signal,
+    });
+    return await res.json();
+  } catch (error) {
+    throw new Error('行情接口请求失败');
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function parseTencentKlines(payload, tencent) {
+  const block = payload && payload.data && payload.data[tencent];
+  const rows = block && (block.qfqday || block.day);
+  if (!Array.isArray(rows) || !rows.length) {
+    throw new Error('接口返回异常');
+  }
+  return rows.map((parts) => {
+    return {
+      date: parts[0],
+      open: Number(parts[1]),
+      close: Number(parts[2]),
+      high: Number(parts[3]),
+      low: Number(parts[4]),
+      volume: Number(parts[5]),
+      turnover: Number(parts[7]),
+      amountWan: Number(parts[8]),
+    };
+  });
+}
+
+function compareReportToOnline(report, target, online) {
+  const parsed = report.parsed || parseReport(report.content, report.date);
+  const source = target.kind === 'index' ? getMarketByName(parsed, target.name) : getHolding(report, target.name);
+  if (!source) {
+    return [{ name: target.name, field: '报告数据', reportValue: '缺失', onlineValue: '可获取', status: 'missing' }];
+  }
+  const results = [];
+  const push = (field, reportValue, onlineValue, tolerance) => {
+    const reportNumber = parseFloat(String(reportValue == null ? '' : reportValue).replace(/[亿,元%]/g, ''));
+    if (!isFinite(reportNumber) || !isFinite(onlineValue)) {
+      results.push({
+        name: target.name,
+        field,
+        reportValue: reportValue == null ? '—' : reportValue,
+        onlineValue: isFinite(onlineValue) ? onlineValue : '—',
+        status: 'missing',
+      });
+      return;
+    }
+    results.push({
+      name: target.name,
+      field,
+      reportValue,
+      onlineValue: roundNumber(onlineValue),
+      status: Math.abs(reportNumber - onlineValue) <= tolerance ? 'match' : 'mismatch',
+    });
+  };
+
+  push('收盘价', source.price != null ? source.price : source.value, online.close, 0.01);
+  push('涨跌幅', source.change, online.pct, 0.05);
+  push('成交额', source.turnover, online.amountYi, 0.05);
+  if (target.kind === 'stock') {
+    push('换手率', source.turnoverRate, online.turnover, 0.05);
+    push('5日均线', source.ma5, online.ma5, 0.05);
+    push('20日均线', source.ma20, online.ma20, 0.05);
+    push('60日均线', source.ma60, online.ma60, 0.05);
+  }
+  return results;
+}
+
+function getMarketByName(parsed, name) {
+  const market = parsed.market || {};
+  if (name === '上证指数') return market.shIndex;
+  if (name === '深证成指') return market.szIndex;
+  if (name === '创业板指') return market.cybIndex;
+  return null;
+}
+
+function summarizeVerification(results) {
+  const match = results.filter((item) => item.status === 'match').length;
+  const mismatch = results.filter((item) => item.status === 'mismatch').length;
+  const missing = results.filter((item) => item.status === 'missing').length;
+  let text = '';
+  if (mismatch > 0) {
+    text = `${mismatch}项有出入 · ${match}项一致 · ${missing}项未核验`;
+  } else if (missing > 0) {
+    text = `${match}项一致 · ${missing}项未核验`;
+  } else {
+    text = `${match}项全部一致`;
+  }
+  return { match, mismatch, missing, text };
+}
+
+function averageLast(values, count) {
+  if (values.length < count) return null;
+  const slice = values.slice(-count);
+  return Math.round((slice.reduce((sum, value) => sum + value, 0) / count) * 100) / 100;
+}
+
+function dateOffset(date, days) {
+  const value = new Date(`${date}T00:00:00`);
+  value.setDate(value.getDate() + days);
+  return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}`;
+}
+
+function roundNumber(value) {
+  return Math.round(Number(value) * 100) / 100;
+}
+
 function renderTomorrow(items) {
   const list = document.getElementById('tomorrowList');
   list.innerHTML = items.length
@@ -427,6 +666,7 @@ function renderHistory() {
           </div>
           <div class="history-actions">
             <button type="button" class="btn small" data-action="view" data-date="${esc(report.date)}">查看</button>
+            <button type="button" class="btn small" data-action="verify" data-date="${esc(report.date)}">校验</button>
             <button type="button" class="btn small danger" data-action="delete" data-date="${esc(report.date)}">删除</button>
           </div>
         </article>`;
@@ -442,6 +682,13 @@ function handleHistoryClick(event) {
     state.currentDate = date;
     switchView('overview');
     renderAll();
+    return;
+  }
+  if (button.dataset.action === 'verify') {
+    state.currentDate = date;
+    switchView('overview');
+    renderAll();
+    runVerification(date);
     return;
   }
   if (button.dataset.action === 'delete') {
@@ -796,6 +1043,7 @@ function exportData() {
     })),
     reviews: state.reviews,
     notes: state.notes,
+    verification: state.verification,
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
@@ -916,6 +1164,18 @@ function loadNotes() {
 
 function saveNotes() {
   localStorage.setItem(LS_NOTES, JSON.stringify(state.notes));
+}
+
+function loadVerification() {
+  try {
+    return JSON.parse(localStorage.getItem(LS_VERIFY) || '{}');
+  } catch (error) {
+    return {};
+  }
+}
+
+function saveVerification() {
+  localStorage.setItem(LS_VERIFY, JSON.stringify(state.verification));
 }
 
 function setSource(text) {
@@ -1166,6 +1426,12 @@ function esc(value) {
 function weekday(date) {
   const week = ['日', '一', '二', '三', '四', '五', '六'];
   return `周${week[new Date(`${date}T00:00:00`).getDay()]}`;
+}
+
+function formatTime(iso) {
+  if (!iso) return '';
+  const date = new Date(iso);
+  return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 function todayStr() {
